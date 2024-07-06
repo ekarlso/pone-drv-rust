@@ -1,70 +1,103 @@
-use log::{info, LevelFilter};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    string,
+};
+
+use bluer::{
+    Adapter, AdapterEvent, Address, Device, DeviceEvent, DiscoveryFilter, DiscoveryTransport,
+};
+use log;
 use log4rs::{
     append::console::ConsoleAppender,
     config::{Appender, Root},
     Config,
 };
 
-enum CTapCHIDCmd {
-    Msg = 0x03,
-    Cbot = 0x10,
-    Init = 0x06,
-    Ping = 0x01,
-    Cancel = 0x11,
-    Error = 0x3f,
-    KeepAlive = 0x3b,
-    Wink = 0x08,
-    Lock = 0x04,
+use futures::{pin_mut, stream::SelectAll, StreamExt};
+
+mod cmd;
+
+const FIDO_SERVICE_UUID: &str = "0000fffd-0000-1000-8000-00805f9b34fb";
+const FIDO_CONTROL_POINT_UUID: &str = "f1d0fff1-deaa-ecee-b42f-c9ba7ed623bb";
+const FIDO_STATUS_UUID: &str = "f1d0fff2-deaa-ecee-b42f-c9ba7ed623bb";
+const FIDO_CONTROL_POINT_LENGTH_UUID: &str = "f1d0fff3-deaa-ecee-b42f-c9ba7ed623bb";
+const FIDO_SERVICE_REVISION_BITFIELD_UUID: &str = "f1d0fff4-deaa-ecee-b42f-c9ba7ed623bb";
+
+struct Driver {
+    devices: HashMap<String, Device>,
 }
 
-enum CTapHIDCapabilities {
-    Wink = 0x01, // not defined for BLE
-    Error = 0x04,
-    Nmsg = 0x08, // PONE OffPAD currently only supports FIDO2, not U2F, so this will be set for now
-}
-
-enum CTapBLECommand {
-    Ping = 0x01,
-    KeepAlive = 0x82,
-    Msg = 0x83,
-    Cancel = 0xbe,
-    Error = 0xbf,
-}
-
-// ee: https://fidoalliance.org/specs/fido-v2.1-rd-20210309/fido-client-to-authenticator-protocol-v2.1-rd-20210309.html#ble-constantstra
-enum CTapBLEError {
-    InvalidCommand = 0x01,
-    InvalidPAR = 0x02,
-    InvalidLength = 0x03,
-    InvalidSequence = 0x04,
-    RequestTimeout = 0x05,
-    Busy = 0x06,
-    LockRequired = 0x0a,   // Only relevant if HID
-    InvalidChannel = 0x0b, // Only relevant if HID
-    Other = 0x7f,
-}
-
-// Status codes - https://fidoalliance.org/specs/fido-v2.1-rd-20210309/fido-client-to-authenticator-protocol-v2.1-rd-20210309.html#error-responses
-enum CTapStatus {
-    // The command is not a valid CTAP command.
-    ErrInvalidCommand = 0x01,
-    // Invalid message sequencing.
-    ErrInvalidSeq = 0x04,
-    // Command not allowed on this cid.
-    ErrInvalidChannel = 0x0b,
-    // Other unspecified error.
-    ErrOther = 0x7f,
-}
-
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> bluer::Result<()> {
     let stdout = ConsoleAppender::builder().build();
 
     let config = Config::builder()
         .appender(Appender::builder().build("stdout", Box::new(stdout)))
-        .build(Root::builder().appender("stdout").build(LevelFilter::Debug))
+        .build(
+            Root::builder()
+                .appender("stdout")
+                .build(log::LevelFilter::Debug),
+        )
         .unwrap();
 
     let handle = log4rs::init_config(config).unwrap();
 
-    info!("TEST OS TEST ");
+    let session = bluer::Session::new().await?;
+    let adapter = session.default_adapter().await?;
+    adapter.set_powered(true).await?;
+
+    let filter = DiscoveryFilter {
+        transport: DiscoveryTransport::Auto,
+        ..Default::default()
+    };
+    adapter.set_discovery_filter(filter).await?;
+
+    println!(
+        "Using discovery filter:\n{:#?}\n\n",
+        adapter.discovery_filter().await
+    );
+
+    let device_events = adapter.discover_devices().await?;
+    pin_mut!(device_events);
+
+    // let mut all_change_events = SelectAll::new();
+
+    loop {
+        tokio::select! {
+            Some(device_event) = device_events.next() => {
+                match device_event {
+                    AdapterEvent::DeviceAdded(addr) => {
+                        log::info!("Device added: {addr}");
+
+                        let device = adapter.device(addr)?;
+                        if device.is_paired().await? {
+                            log::info!("Device is paired {addr}");
+
+                            let device_uuids = device.uuids().await?;
+                            let device_service_data = device.service_data().await?.unwrap_or_default();
+
+                            let fido_service_uuid = bluer::Uuid::parse_str(FIDO_SERVICE_UUID).unwrap();
+                            if device_uuids.unwrap_or_default().contains(&fido_service_uuid) {
+                                log::info!("Found device uuid {addr}")
+                            } else if device_service_data.contains_key(&fido_service_uuid) {
+                                log::info!("Found by device data {addr}")
+                            }
+
+                            // let viking_names = HashSet::from(["Einar", "Olaf", "Harald"]);
+                        }
+                    }
+                    AdapterEvent::DeviceRemoved(addr) => {
+                        log::info!("Device removed: {addr}");
+                    }
+                    _ => ()
+                }
+            }
+            else => break
+            // Some((addr, DeviceEvent::PropertyChanged(property))) = all_change_events.next() => {}
+        }
+    }
+
+    Ok(())
+    // let device_events = adapter.discover_devices().await?;
 }
