@@ -1,12 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    string,
-};
+use std::collections::HashMap;
 
-use bluer::{
-    Adapter, AdapterEvent, Address, Device, DeviceEvent, DiscoveryFilter, DiscoveryTransport,
-};
+use bluer::{AdapterEvent, Device, DiscoveryFilter, DiscoveryTransport};
 use log;
 use log4rs::{
     append::console::ConsoleAppender,
@@ -14,7 +8,7 @@ use log4rs::{
     Config,
 };
 
-use futures::{pin_mut, stream::SelectAll, StreamExt};
+use futures::{pin_mut, StreamExt};
 
 mod cmd;
 
@@ -24,14 +18,14 @@ const FIDO_STATUS_UUID: &str = "f1d0fff2-deaa-ecee-b42f-c9ba7ed623bb";
 const FIDO_CONTROL_POINT_LENGTH_UUID: &str = "f1d0fff3-deaa-ecee-b42f-c9ba7ed623bb";
 const FIDO_SERVICE_REVISION_BITFIELD_UUID: &str = "f1d0fff4-deaa-ecee-b42f-c9ba7ed623bb";
 
-struct Instance <'a>{
-    device: Device,
+struct Instance<'a> {
+    device: &'a Device,
 }
 
-fn register_device<'a>(registry: &mut HashMap<&str, Instance<'a>>, dev: &Device) {
+fn register_device<'a>(registry: &mut HashMap<String, Instance<'a>>, dev: &'a Device) {
     let instance = Instance { device: dev };
 
-    let key = instance.device.adapter_name();
+    let key = instance.device.adapter_name().to_string();
     registry.insert(key, instance);
 }
 
