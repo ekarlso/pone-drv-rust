@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, process::Output, result};
+use std::{collections::HashMap, fs, sync::Arc};
 
 use bluer::{AdapterEvent, Device, DiscoveryFilter, DiscoveryTransport};
 use log;
@@ -9,8 +9,7 @@ use log4rs::{
 };
 
 use futures::{pin_mut, StreamExt};
-use tokio::sync::mpsc::Receiver;
-use uhid_virt::{Bus, CreateParams, InputEvent, UHIDDevice};
+use uhid_virt::{Bus, CreateParams, UHIDDevice};
 
 const FIDO_SERVICE_UUID: &str = "0000fffd-0000-1000-8000-00805f9b34fb";
 const FIDO_CONTROL_POINT_UUID: &str = "f1d0fff1-deaa-ecee-b42f-c9ba7ed623bb";
@@ -40,6 +39,7 @@ const RDESC: [u8; 34] = [
     0xC0, // End Collection
 ];
 
+#[derive(Clone)]
 struct Instance {
     ble_device: Device,
     uhid_device: UHIDDevice<fs::File>,
@@ -88,7 +88,7 @@ impl Instance {
 }
 
 struct Driver {
-    instances: HashMap<String, Instance>,
+    instances: HashMap<String, Arc<Instance>>,
 }
 
 impl Driver {
@@ -104,11 +104,13 @@ impl Driver {
         if !self.instances.contains_key(&addr) {
             log::info!("Device isn't active, starting UHID");
 
-            let inst = Instance::new(device);
+            let inst = Arc::new(Instance::new(device));
+            let inst_clone = inst.clone();
 
-            tokio::spawn(inst.receive_data());
+            tokio::spawn(<Instance as Clone>::clone(&inst).receive_data());
+
             // Track the instance until we are done or dev is gone?
-            self.instances.insert(addr, inst);
+            self.instances.insert(addr, inst_clone);
         }
     }
 
