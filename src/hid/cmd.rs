@@ -1,13 +1,17 @@
+use strum_macros::FromRepr;
+
+#[derive(FromRepr, Debug, PartialEq)]
+#[repr(u8)]
 pub enum CTapCHIDCmd {
-    Msg = 0x03,
-    Cbot = 0x10,
-    Init = 0x06,
     Ping = 0x01,
+    Msg = 0x03,
+    Lock = 0x04,
+    Init = 0x06,
+    Wink = 0x08,
+    Cbot = 0x10,
     Cancel = 0x11,
     Error = 0x3f,
     KeepAlive = 0x3b,
-    Wink = 0x08,
-    Lock = 0x04,
 }
 
 pub enum CTapHIDCapabilities {
